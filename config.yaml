@@ -1,0 +1,16 @@
+meilisearch:
+  api_url: http://localhost:7700
+  admin_api_key: ""
+  sync_interval_time: 10
+  upload_size: 10000
+data_source:
+  source_type: PostgresSQL
+  host: localhost
+  port: 5432
+  username: postgres
+  password: postgres
+  database: test_meilisearch
+synchronize:
+  - index_name: test_meilisearch
+    primary_key: user_id
+    full_sync: true
