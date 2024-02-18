@@ -3,6 +3,7 @@ pub mod meili_config;
 pub mod index_setting;
 pub mod meili_enum;
 
+//todo: implement interaction with meilisearch instance
 pub struct MeiliSearchService{
      meili_client:  Client,
 }

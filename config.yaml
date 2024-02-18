@@ -10,7 +10,7 @@ data_source:
   username: postgres
   password: postgres
   database: test_meilisearch
-synchronize:
+synchronize_tables:
   - index_name: test_meilisearch
     primary_key: user_id
     full_sync: true

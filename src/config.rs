@@ -9,7 +9,7 @@ use crate::meili::index_setting::IndexSetting;
 pub struct Config{
     meilisearch: MeiliConfig,
     data_source: DataSourceConfig,
-    synchronize: Vec<IndexSetting>
+    synchronize_tables: Vec<IndexSetting>
 }
 
 impl Config{
@@ -24,8 +24,8 @@ impl Config{
     pub fn get_data_source(&self) -> &DataSourceConfig{
         &self.data_source
     }
-    pub fn get_synchronize(&self) -> &Vec<IndexSetting>{
-        &self.synchronize
+    pub fn get_synchronize_tables(&self) -> &Vec<IndexSetting>{
+        &self.synchronize_tables
     }
 }
 

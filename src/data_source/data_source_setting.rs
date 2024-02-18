@@ -7,8 +7,7 @@ pub struct DataSourceConfig{
     host: String,
     port: u16,
     username: String,
-    password: Option<String>,
-    access_key: Option<String>,
+    password: String,
     database: String,
 }
 
@@ -25,11 +24,8 @@ impl DataSourceConfig {
     pub fn get_username(&self) -> &String{
         &self.username
     }
-    pub fn get_password(&self) -> &Option<String> {
+    pub fn get_password(&self) -> &String {
         &self.password
-    }
-    pub fn get_access_key(&self) -> &Option<String>{
-        &self.access_key
     }
     pub fn get_database(&self) -> &String{
         &self.database

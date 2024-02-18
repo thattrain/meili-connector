@@ -1,48 +1,50 @@
-use tokio_postgres::{Client, NoTls, Error, row};
+use serde_json::{to_string, Value};
+use serde_json::map::Values;
+use sqlx::{Column, ColumnIndex, PgPool, Row};
 use crate::data_source::data_source_setting::DataSourceConfig;
 use crate::data_source::DataSource;
+use crate::meili::index_setting::IndexSetting;
 
-pub struct Postgres{
-    client: Client
+
+
+pub struct PostgresSource<'a> {
+    synchronize_tables: &'a Vec<IndexSetting>,
+    data_source_config: &'a DataSourceConfig
 }
 
-impl Postgres{
-    pub async fn new(source_setting: &DataSourceConfig) -> Postgres {
-        let mut config = format!("host={} port={} user={} dbname={} " ,
-                                         source_setting.get_host(),
-                                         source_setting.get_port(),
-                                         source_setting.get_username(),
-                                         source_setting.get_database());
-        
-        match source_setting.get_password() {
-            Some(password) => {
-                config.push_str(format!("password={}", password.trim()).as_str())
-            }
-            _ => {}
+impl PostgresSource <'_>{
+
+    pub fn new<'a>(synchronize_tables: &'a Vec<IndexSetting>, data_source_config: &'a DataSourceConfig) -> PostgresSource<'a>{
+        PostgresSource{
+            synchronize_tables,
+            data_source_config
         }
+    }
+    async fn create_connection(&self) -> PgPool {
+        let data_source_config = &self.data_source_config;
+        let db_url = format!("postgresql://{}:{}@{}:{}/{}",
+                                 data_source_config.get_username(),
+                                 data_source_config.get_password(),
+                                 data_source_config.get_host(),
+                                 data_source_config.get_port(),
+                                 data_source_config.get_database());
 
-        let (client, connection) = tokio_postgres::connect(&config.as_str(), NoTls)
-            .await.expect("Can not create connection to Postgres host");
+        let pg_pool = PgPool::connect(&db_url)
+            .await
+            .expect(format!("Can not connect to Postgres instance at {}:{}", data_source_config.get_username(), data_source_config.get_port()).as_str());
 
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("Connection error: {}", e);
-            }
-        });
-
-        Postgres{
-            client
-        }
+        pg_pool
     }
 }
 
-impl DataSource for Postgres{
-    async fn get_full_data(&self) -> Result<(), Error> {
-        let rows = &self.client
-            .query("SELECT username FROM users",&[])
-            .await;
-        println!("Size: {}", rows.as_ref().unwrap().len());
+impl <'a> DataSource for PostgresSource <'a> {
+     async fn get_full_data(&self) -> String{
+        let pg_pool = self.create_connection().await;
+        let query = sqlx::query("SELECT * FROM users");
+        let result = query.fetch_all(&pg_pool).await;
 
-        Ok(())
+
+
+        return "".to_string();
     }
 }
