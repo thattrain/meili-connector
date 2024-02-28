@@ -11,9 +11,6 @@ pub struct IndexSetting{
 /*  Associate with primary key of the table */
     primary_key: String,
 
-/* Whether to sync full table or not - If false must specify fields to sync */
-    full_sync: Option<bool>,
-
 /*  List of fields to sync */
     // #[serde_as(as = "Option<Vec<String>>")]
     sync_fields: Option<Vec<String>>,
@@ -35,4 +32,16 @@ pub struct IndexSetting{
     Order of the elements in this list will determine from the most impacted rules to the least.    */
     ranking_rules: Option<Vec<String>>,
 
+}
+
+impl IndexSetting{
+    pub fn get_index_name(&self) -> &String{
+        return &self.index_name;
+    }
+    pub fn get_primary_key(&self) -> &String{
+        return  &self.primary_key;
+    }
+    pub fn get_sync_fields(&self) -> &Option<Vec<String>>{
+        return &self.sync_fields
+    }
 }

@@ -1,6 +1,6 @@
 meilisearch:
   api_url: http://localhost:7700
-  admin_api_key: ""
+  admin_api_key: "4d210c85a27082683758d083d6c1298ee7e1e97385edeaad3250b9cd8aebd276"
   sync_interval_time: 10
   upload_size: 10000
 data_source:
@@ -11,6 +11,10 @@ data_source:
   password: postgres
   database: test_meilisearch
 synchronize_tables:
-  - index_name: test_meilisearch
+  - index_name: users
     primary_key: user_id
-    full_sync: true
+    sync_fields:
+      - user_id
+      - username
+      - email
+      - created_at

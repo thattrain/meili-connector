@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::data_source::data_source_enum::SupportedDataSource;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataSourceConfig{
     source_type:  SupportedDataSource,
     host: String,

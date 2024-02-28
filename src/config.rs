@@ -7,9 +7,9 @@ use crate::meili::index_setting::IndexSetting;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config{
-    meilisearch: MeiliConfig,
-    data_source: DataSourceConfig,
-    synchronize_tables: Vec<IndexSetting>
+    pub meilisearch: MeiliConfig,
+    pub data_source: DataSourceConfig,
+    pub synchronize_tables: Vec<IndexSetting>
 }
 
 impl Config{
@@ -18,16 +18,9 @@ impl Config{
         let config: Config = serde_yaml::from_reader(file).expect("Could not read value from config file");
         return config;
     }
-    pub fn get_meili_config(&self) -> &MeiliConfig{
-        &self.meilisearch
-    }
-    pub fn get_data_source(&self) -> &DataSourceConfig{
-        &self.data_source
-    }
-    pub fn get_synchronize_tables(&self) -> &Vec<IndexSetting>{
-        &self.synchronize_tables
-    }
+
+    //todo: impl validate config and error handling here
+
 }
 
 
-//todo: impl validate config and error handling here
