@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::data_source::data_source_setting::DataSourceConfig;
 use crate::data_source::DataSource;
@@ -27,14 +28,21 @@ impl Synchronizer{
        // let meili_config = self.meili_config;
        // let meili_service = MeiliSearchService::new()
 
-       for index in synchronize_tables{
-           let table = Arc::new(index);
-           let postgres_source = PostgresSource::new(table, self.data_source_config.clone());
+       for index_setting in synchronize_tables{
+           let table = Arc::new(index_setting.clone());
+           let data_source_config = Arc::new(self.data_source_config.clone());
 
-           let all_data = postgres_source.get_full_data(4).await;
-           for record in &all_data{
-               println!("Record: {:?}", record);
-           }
+           // start event listener and query all data
+           let meili_config = self.meili_config.clone();
+           tokio::spawn(async move {
+               let mut postgres_source = PostgresSource::new(Arc::clone(&table), Arc::clone(&data_source_config));
+               let limit =  meili_config.get_upload_size().unwrap();
+               let all_data = postgres_source.get_full_data(limit).await;
+               for record in &all_data{
+                   println!("Record: {:?}", record);
+               }
+           });
+           PostgresSource::start_event_notifier(index_setting.clone(), self.data_source_config.clone()).await;
        }
 
 

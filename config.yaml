@@ -2,14 +2,14 @@ meilisearch:
   api_url: http://localhost:7700
   admin_api_key: "4d210c85a27082683758d083d6c1298ee7e1e97385edeaad3250b9cd8aebd276"
   sync_interval_time: 10
-  upload_size: 10000
+  upload_size: 2
 data_source:
   source_type: PostgresSQL
   host: localhost
   port: 5432
-  username: postgres
-  password: postgres
-  database: test_meilisearch
+  username: dattran
+  password: dattran
+  database: postgres
 synchronize_tables:
   - index_name: users
     primary_key: user_id

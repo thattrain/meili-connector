@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 // - If displayed_fields and searchable_fields empty all fields
 //in the index will be both displayed and searchable by default
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IndexSetting{
 /*  Associate with a table name in synced database */
     index_name: String,
