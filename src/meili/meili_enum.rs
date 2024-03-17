@@ -15,3 +15,10 @@ pub enum TaskStatus{
     Failed,
     Canceled
 }
+
+#[derive(Debug)]
+pub enum Event {
+    Insert,
+    Update,
+    Delete
+}

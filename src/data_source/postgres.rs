@@ -10,14 +10,17 @@ use futures::{
     future::{self},
     ready, Sink, StreamExt,
 };
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use sqlx::{Executor, PgPool};
+use tokio::sync::mpsc::Sender;
 use tokio_postgres::{CopyBothDuplex, NoTls, SimpleQueryMessage, types::PgLsn};
 
 use crate::data_source::data_source_setting::DataSourceConfig;
 use crate::data_source::DataSource;
 use crate::data_source::deserializer::SerMapPgRow;
+use crate::meili::EventMessage;
 use crate::meili::index_setting::IndexSetting;
+use crate::meili::meili_enum::Event::*;
 
 type JsonValues = Arc<Mutex<Vec<Value>>>;
 const SECONDS_FROM_UNIX_EPOCH_TO_2000: u128 = 946684800;
@@ -70,7 +73,7 @@ impl PostgresSource{
             data_source_config,
         }
     }
-     pub async fn start_event_notifier(index_setting: IndexSetting, data_source_config: DataSourceConfig){
+     pub async fn start_event_notifier(index_setting: IndexSetting, data_source_config: DataSourceConfig, event_sender: Sender<EventMessage>){
 
          let db_string = format!("user={} password={} host={} port={} dbname={}",
                                  data_source_config.get_username(),
@@ -108,7 +111,7 @@ impl PostgresSource{
              slot,
              publication
          );
-         event_notifier.start_listening().await;
+         event_notifier.start_listening(event_sender).await;
 
     }
 
@@ -167,16 +170,16 @@ impl Publication {
             })
             .collect::<Vec<_>>();
 
-        if let Some(publication) = rows.first() {
+        return if let Some(publication) = rows.first() {
             let schema_name = publication.get("schemaname").unwrap().to_string();
             let table_name = publication.get("tablename").unwrap().to_string();
             println!(
                 "Found publication {:?}/{:?}, ready to start replication",
                 schema_name, table_name
             );
-            return Ok(true);
+            Ok(true)
         } else {
-            return Ok(false);
+            Ok(false)
         }
     }
 
@@ -318,7 +321,8 @@ impl ReplicationEventNotifier{
         }
     }
 
-    async fn start_listening(&mut self){
+    //todo: only listening changes from registered columns
+    async fn start_listening(&mut self, event_sender: Sender<EventMessage>){
         let full_table_name = format!("{}.{}", self.schema_name, self.table_name);
         let wal2json_options = vec![
             ("pretty-print", "false"),
@@ -356,13 +360,15 @@ impl ReplicationEventNotifier{
             match self.stream.as_mut().unwrap().next().await {
                 Some(Ok(event)) => {
                     // (todo:) should return error?
-                    self.process_wal2json_event(&event).await;
+                    self.process_wal2json_event(&event, event_sender.clone()).await;
                 }
                 Some(Err(e)) => {
+                    //todo: panic here??
                     println!("Error reading from stream:{}", e);
                     continue;
                 }
                 None => {
+                    //todo: panic here??
                     println!("Stream closed");
                     break;
                 }
@@ -372,14 +378,14 @@ impl ReplicationEventNotifier{
     }
 
     // this function process WAL event decoded by wal2json plugin
-    async fn process_wal2json_event(&mut self, event: &[u8]) {
+    async fn process_wal2json_event(&mut self, event: &[u8], event_sender: Sender<EventMessage>) {
         let identify_byte = event[0];
         match identify_byte {        // first byte is identified byte
             b'w' => {   // byte indicate message as WAL data
                 // first 24 bytes are metadata
                 let json: Value = serde_json::from_slice(&event[25..]).unwrap();
                 // handle WAL data stream
-                self.process_change_event(json).await;
+                self.process_change_event(json, event_sender).await;
             }
             b'k' => {   // byte indicate primary keepalive message
                 let last_byte = event.last().unwrap();
@@ -394,11 +400,11 @@ impl ReplicationEventNotifier{
         }
     }
 
-    async fn process_change_event(&mut self, record: Value) {
+    async fn process_change_event(&mut self, record: Value, event_sender: Sender<EventMessage>) {
         match record["action"].as_str().unwrap() {
             "B" => {
                 println!("Begin===");
-                println!("{}", serde_json::to_string_pretty(&record).unwrap());
+                // println!("{}", serde_json::to_string_pretty(&record).unwrap());
                 let lsn_str = record["nextlsn"].as_str().unwrap();
                 self.commit_lsn = lsn_str.parse::<PgLsn>().unwrap();
             }
@@ -412,22 +418,46 @@ impl ReplicationEventNotifier{
                     );
                 }
                 println!("Commit===");
-                println!("{}", serde_json::to_string_pretty(&record).unwrap());
-                //todo: send event here through tokio channel
+                // println!("{}", serde_json::to_string_pretty(&record).unwrap());
 
                 self.commit().await;
             }
-            "I" => {        //insert events
-                println!("Insert===");
-                println!("{}", serde_json::to_string_pretty(&record).unwrap());
+            "I" => {        //insert event
+                let columns =  record["columns"].as_array().unwrap();
+                let mut map = Map::new();
+                for column in columns.iter(){
+                    let column_name = column.get("name").unwrap().as_str().unwrap();
+                    let column_value = column.get("value").unwrap().to_string();
+                    map.insert(column_name.parse().unwrap(), column_value.parse().unwrap());
+                }
+                let json_obj =  Value::Object(map);
+                println!("insert record: {:?}", json_obj);
+                let table_name = record["table"].as_str().unwrap();
+                let insert_message = EventMessage{
+                    event_type: Insert,
+                    index_name: table_name.to_string(),
+                    payload: Arc::new(vec![json_obj])
+                };
+                //todo: handle error???
+                let _ = &event_sender.send(insert_message).await.unwrap();
             }
-            "U" => {        //update events
+            "U" => {        //update event
+                //TODO
                 println!("Update===");
                 println!("{}", serde_json::to_string_pretty(&record).unwrap());
             }
-            "D" => {        //delete events
-                println!("Delete====");
-                println!("{}", serde_json::to_string_pretty(&record).unwrap());
+            "D" => {        //delete event
+                let pk_key = record["identity"].get(0).unwrap().get("name").unwrap().as_str().unwrap();
+                let value =  record["identity"].get(0).unwrap().get("value").unwrap().to_string();
+                let table_name = record["table"].as_str().unwrap();
+                let deleted_record = json!({ pk_key: value });
+                let delete_message = EventMessage{
+                    event_type: Delete,
+                    index_name: table_name.to_string(),
+                    payload: Arc::new(vec![deleted_record])
+                };
+                //todo: handle error???
+                let _ = &event_sender.send(delete_message).await.unwrap();
             }
             _ => {
                 println!("unknown event: {}",  record["action"].as_str().unwrap());
