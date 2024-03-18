@@ -8,7 +8,9 @@ mod synchronizer;
 
 #[tokio::main]
 async  fn main(){
-    //todo: print banner and handle options from command line here
+    //todo: handle options from command line here
+
+    Config::load_banner("banner.txt");
     let config = Config::read_config("config.yaml".to_string());
     let synchronizer = Synchronizer::get_synchronizer(config.meilisearch, config.data_source, config.synchronize_tables);
     synchronizer.sync().await;
