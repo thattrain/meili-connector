@@ -104,7 +104,24 @@ impl MeiliSearchService{
     }
 
     async fn update_document(&self, index_setting: &IndexSetting, documents: &Vec<Value>){
-
+        let meili_client = self.get_meili_client();
+        if !meili_client.is_none() {
+            let index = meili_client.unwrap().index(index_setting.get_index_name());
+            let pk_key = index_setting.get_primary_key().as_str();
+            let mut ndjson = String::from("");
+            for document in documents{
+                ndjson.push_str(serde_json::to_string(document).unwrap().as_str());
+                ndjson.push_str("\n");
+            }
+            index
+                .update_documents_ndjson(Box::leak(ndjson.into_boxed_str()).as_bytes(), Some(pk_key))
+                .await
+                .unwrap()
+                .wait_for_completion(meili_client.unwrap(), None, None)
+                .await
+                .unwrap();
+            println!("Insert successfully to Meilisearch !!!!");
+        }
     }
 
 

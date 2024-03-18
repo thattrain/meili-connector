@@ -431,7 +431,6 @@ impl ReplicationEventNotifier{
                     map.insert(column_name.parse().unwrap(), column_value.parse().unwrap());
                 }
                 let json_obj =  Value::Object(map);
-                println!("insert record: {:?}", json_obj);
                 let table_name = record["table"].as_str().unwrap();
                 let insert_message = EventMessage{
                     event_type: Insert,
@@ -442,9 +441,22 @@ impl ReplicationEventNotifier{
                 let _ = &event_sender.send(insert_message).await.unwrap();
             }
             "U" => {        //update event
-                //TODO
-                println!("Update===");
-                println!("{}", serde_json::to_string_pretty(&record).unwrap());
+                let columns =  record["columns"].as_array().unwrap();
+                let mut map = Map::new();
+                for column in columns.iter(){
+                    let column_name = column.get("name").unwrap().as_str().unwrap();
+                    let column_value = column.get("value").unwrap().to_string();
+                    map.insert(column_name.parse().unwrap(), column_value.parse().unwrap());
+                }
+                let json_obj =  Value::Object(map);
+                let table_name = record["table"].as_str().unwrap();
+                let insert_message = EventMessage{
+                    event_type: Update,
+                    index_name: table_name.to_string(),
+                    payload: Arc::new(vec![json_obj])
+                };
+                //todo: handle error???
+                let _ = &event_sender.send(insert_message).await.unwrap();
             }
             "D" => {        //delete event
                 let pk_key = record["identity"].get(0).unwrap().get("name").unwrap().as_str().unwrap();
