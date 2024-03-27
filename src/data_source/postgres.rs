@@ -5,6 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH}
 };
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{
     future::{self},
@@ -26,9 +27,9 @@ type JsonValues = Arc<Mutex<Vec<Value>>>;
 const SECONDS_FROM_UNIX_EPOCH_TO_2000: u128 = 946684800;
 const SLOT_PREFIX: &str = "meili_";
 
-pub struct PostgresSource {
-    index_setting: Arc<IndexSetting>,
-    data_source_config: Arc<DataSourceConfig>,
+pub struct Postgres {
+    index_setting: IndexSetting,
+    data_source_config: DataSourceConfig,
 }
 struct Publication {
     client: Arc<tokio_postgres::Client>,
@@ -61,59 +62,59 @@ struct ReplicationEventNotifier {
     stream: Option<Pin<Box<CopyBothDuplex<Bytes>>>>,
 }
 
-impl PostgresSource{
+impl Postgres {
 
     fn get_index_setting(&self) -> &IndexSetting{
         return &self.index_setting;
     }
 
-    pub fn new(index_setting: Arc<IndexSetting>, data_source_config: Arc<DataSourceConfig>) -> PostgresSource{
+    pub fn new(index_setting: IndexSetting, data_source_config: DataSourceConfig) -> Self {
         Self{
             index_setting,
             data_source_config,
         }
     }
-     pub async fn start_event_notifier(index_setting: IndexSetting, data_source_config: DataSourceConfig, event_sender: Sender<EventMessage>){
-
-         let db_string = format!("user={} password={} host={} port={} dbname={}",
-                                 data_source_config.get_username(),
-                                 data_source_config.get_password(),
-                                 data_source_config.get_host(),
-                                 data_source_config.get_port(),
-                                 data_source_config.get_database()
-         );
-
-         //create a Postgres publication if not exist
-         let client = Arc::new(DBClient::new(db_string.as_str()).await.unwrap().client);
-         let schema_name = "public".to_string();
-         let publication = Publication::new(Arc::clone(&client), &schema_name, index_setting.get_index_name());
-         if !publication.check_exists().await.unwrap() {
-             publication.create().await.unwrap();
-         }
-
-         //create a slot if not exist subscribe to the publication
-         let slot_name = format!("{}{}", SLOT_PREFIX, index_setting.get_index_name());
-         let repl_client = Arc::new(
-             DBClient::new(&format!("{} replication=database", db_string))
-                 .await
-                 .unwrap()
-                 .client,
-         );
-         let mut slot = Slot::new(Arc::clone(&repl_client), &slot_name);
-         slot.get_confirmed_lsn().await.unwrap();
-         if slot.lsn.is_none() {
-             println!("Replication slot {slot_name} does not exist - Creating replication slot: {slot_name}");
-             slot.create().await.unwrap();
-         }
-
-         let mut event_notifier = ReplicationEventNotifier::new(
-             Arc::clone(&repl_client),
-             slot,
-             publication
-         );
-         event_notifier.start_listening(event_sender).await;
-
-    }
+    //  pub async fn start_event_notifier(index_setting: IndexSetting, data_source_config: DataSourceConfig, event_sender: Sender<EventMessage>){
+    //
+    //      let db_string = format!("user={} password={} host={} port={} dbname={}",
+    //                              data_source_config.get_username(),
+    //                              data_source_config.get_password(),
+    //                              data_source_config.get_host(),
+    //                              data_source_config.get_port(),
+    //                              data_source_config.get_database()
+    //      );
+    //
+    //      //create a Postgres publication if not exist
+    //      let client = Arc::new(DBClient::new(db_string.as_str()).await.unwrap().client);
+    //      let schema_name = "public".to_string();
+    //      let publication = Publication::new(Arc::clone(&client), &schema_name, index_setting.get_index_name());
+    //      if !publication.check_exists().await.unwrap() {
+    //          publication.create().await.unwrap();
+    //      }
+    //
+    //      //create a slot if not exist subscribe to the publication
+    //      let slot_name = format!("{}{}", SLOT_PREFIX, index_setting.get_index_name());
+    //      let repl_client = Arc::new(
+    //          DBClient::new(&format!("{} replication=database", db_string))
+    //              .await
+    //              .unwrap()
+    //              .client,
+    //      );
+    //      let mut slot = Slot::new(Arc::clone(&repl_client), &slot_name);
+    //      slot.get_confirmed_lsn().await.unwrap();
+    //      if slot.lsn.is_none() {
+    //          println!("Replication slot {slot_name} does not exist - Creating replication slot: {slot_name}");
+    //          slot.create().await.unwrap();
+    //      }
+    //
+    //      let mut event_notifier = ReplicationEventNotifier::new(
+    //          Arc::clone(&repl_client),
+    //          slot,
+    //          publication
+    //      );
+    //      event_notifier.start_listening(event_sender).await;
+    //
+    // }
 
     async fn create_connection(&self) -> PgPool {
         let data_source_config = &self.data_source_config;
@@ -185,7 +186,7 @@ impl Publication {
 
     pub async fn create(&self) -> Result<u64, tokio_postgres::Error> {
         let query = format!(
-            "CREATE PUBLICATION {} FOR TABLE {}",
+            "CREATE PUBLICATION {} FOR TABLE {} WITH (publish = 'insert, update, delete')",
             self.pub_name(),
             self.table_name
         );
@@ -546,11 +547,8 @@ fn prepare_standby_status_update(write_lsn: PgLsn) -> Bytes {
 
     Bytes::from(data_to_send)
 }
-
-
-
-
-impl DataSource for PostgresSource {
+#[async_trait]
+impl DataSource for Postgres {
     async fn get_total_record_num(&self) -> i64 {
         let pg_pool = self.create_connection().await;
         let table_name = self.get_index_setting().get_index_name();
@@ -614,4 +612,47 @@ impl DataSource for PostgresSource {
 
         return pg_total_records.lock().unwrap().to_vec();
     }
+
+     async fn start_event_notifier(&self, index_setting: IndexSetting, data_source_config: DataSourceConfig, event_sender: Sender<EventMessage>){
+
+        let db_string = format!("user={} password={} host={} port={} dbname={}",
+                                data_source_config.get_username(),
+                                data_source_config.get_password(),
+                                data_source_config.get_host(),
+                                data_source_config.get_port(),
+                                data_source_config.get_database()
+        );
+
+        //create a Postgres publication if not exist
+        let client = Arc::new(DBClient::new(db_string.as_str()).await.unwrap().client);
+        let schema_name = "public".to_string();
+        let publication = Publication::new(Arc::clone(&client), &schema_name, index_setting.get_index_name());
+        if !publication.check_exists().await.unwrap() {
+            publication.create().await.unwrap();
+        }
+
+        //create a slot if not exist subscribe to the publication
+        let slot_name = format!("{}{}", SLOT_PREFIX, index_setting.get_index_name());
+        let repl_client = Arc::new(
+            DBClient::new(&format!("{} replication=database", db_string))
+                .await
+                .unwrap()
+                .client,
+        );
+        let mut slot = Slot::new(Arc::clone(&repl_client), &slot_name);
+        slot.get_confirmed_lsn().await.unwrap();
+        if slot.lsn.is_none() {
+            println!("Replication slot {slot_name} does not exist - Creating replication slot: {slot_name}");
+            slot.create().await.unwrap();
+        }
+
+        let mut event_notifier = ReplicationEventNotifier::new(
+            Arc::clone(&repl_client),
+            slot,
+            publication
+        );
+        event_notifier.start_listening(event_sender).await;
+
+    }
+
 }

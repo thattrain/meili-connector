@@ -4,7 +4,7 @@ meilisearch:
   sync_interval_time: 10
   upload_size: 2
 data_source:
-  source_type: PostgresSQL
+  source_type: Postgres
   host: localhost
   port: 5432
   username: dattran

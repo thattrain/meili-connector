@@ -16,13 +16,14 @@ pub mod meili_enum;
 pub struct MeiliSearchService {
      meili_client: Client,
 }
-
+#[derive(Debug)]
 pub struct EventMessage {
     pub event_type: Event,
     pub index_name: String,
     pub payload: Arc<Vec<Value>>
 }
 
+//todo: handle errors
 impl MeiliSearchService{
     pub fn get_meili_service(meili_config: MeiliConfig) -> &'static MeiliSearchService{
         static INSTANCE: OnceLock<MeiliSearchService> = OnceLock::new();
@@ -44,6 +45,7 @@ impl MeiliSearchService{
     // region handle meili event
     pub async fn handle_event(&self, event_message: EventMessage, index_setting: IndexSetting){
         let documents = event_message.payload;
+        println!("Record: {:?}", &documents);
         match event_message.event_type {
             Insert => {
                 println!("Handle add document to Meilisearch ...");

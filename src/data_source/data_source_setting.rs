@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::data_source::data_source_enum::SupportedDataSource;
+use crate::data_source::SupportedDataSource;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataSourceConfig{
