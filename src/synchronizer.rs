@@ -32,13 +32,8 @@ impl Synchronizer<'static>{
             while let Some(event) = rx.recv().await{
                 let index_setting = Self::get_index_setting_by_name(&event.index_name, &index_setting_list);
                 match index_setting {
-                    Some(index_setting) => {
-                        // println!("Receive event type: {:?} - Payload type: {} - table name: {}", event.event_type, event.payload.len(), event.index_name);
-                        meili_service.handle_event(event, index_setting).await;
-                    },
-                    None => {
-                        println!("Table {} was not registered for changes !!!", event.index_name)
-                    }
+                    Some(index_setting) => meili_service.handle_event(event, index_setting).await,
+                    None => println!("Table {} was not registered for changes !!!", event.index_name)
                 }
             }
         });
@@ -59,9 +54,16 @@ impl Synchronizer<'static>{
             .find(|index_setting| index_setting.get_index_name() == index_name);
         return index_setting;
     }
-    fn initialize_data_source(source_config: DataSourceConfig, index: IndexSetting) -> impl DataSource{
+    async fn initialize_data_source(source_config: DataSourceConfig, index: IndexSetting) -> impl DataSource{
         match source_config.get_data_source() {
-            Postgres => Postgres::new(index, source_config)
+            Postgres => {
+                let postgres = Postgres::new(index, source_config);
+                if postgres.get_version().await < 12.0 {
+                    panic!("Not support Postgres version below 12");
+                }
+                println!("Postgres version: {}", postgres.get_version().await);
+                postgres
+            }
         }
     }
 
@@ -75,7 +77,7 @@ impl Synchronizer<'static>{
 
            let query_limit = meili_config.get_upload_size().unwrap();
            // query all data and start event listener
-           let source = Arc::new(Self::initialize_data_source(source_config, table));
+           let source = Arc::new(Self::initialize_data_source(source_config, table).await);
            let mv_source = source.clone();
            tokio::spawn(async move {
                let all_data = mv_source.get_full_data(query_limit.clone()).await;

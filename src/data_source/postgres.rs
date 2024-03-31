@@ -1,4 +1,5 @@
 use std::{
+    fmt::format,
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
@@ -11,6 +12,7 @@ use futures::{
     future::{self},
     ready, Sink, StreamExt,
 };
+use regex::Regex;
 use serde_json::{json, Map, Value};
 use sqlx::{Executor, PgPool};
 use tokio::sync::mpsc::Sender;
@@ -35,14 +37,7 @@ struct Publication {
     client: Arc<tokio_postgres::Client>,
     schema_name: String,
     table_name: String,
-    table_cols: Vec<Column>,
-}
-#[derive(Debug, Clone)]
-struct Column {
-    name: String,
-    data_type: String,
-    is_nullable: bool,
-    is_primary: bool,
+    publish_cols: Vec<String>,
 }
 struct Slot {
     client: Arc<tokio_postgres::Client>,
@@ -57,7 +52,7 @@ struct ReplicationEventNotifier {
     slot_name: String,
     schema_name: String,
     table_name: String,
-    table_cols: Vec<Column>,
+    registered_cols: Vec<String>,
     client: Arc<tokio_postgres::Client>,
     stream: Option<Pin<Box<CopyBothDuplex<Bytes>>>>,
 }
@@ -74,48 +69,6 @@ impl Postgres {
             data_source_config,
         }
     }
-    //  pub async fn start_event_notifier(index_setting: IndexSetting, data_source_config: DataSourceConfig, event_sender: Sender<EventMessage>){
-    //
-    //      let db_string = format!("user={} password={} host={} port={} dbname={}",
-    //                              data_source_config.get_username(),
-    //                              data_source_config.get_password(),
-    //                              data_source_config.get_host(),
-    //                              data_source_config.get_port(),
-    //                              data_source_config.get_database()
-    //      );
-    //
-    //      //create a Postgres publication if not exist
-    //      let client = Arc::new(DBClient::new(db_string.as_str()).await.unwrap().client);
-    //      let schema_name = "public".to_string();
-    //      let publication = Publication::new(Arc::clone(&client), &schema_name, index_setting.get_index_name());
-    //      if !publication.check_exists().await.unwrap() {
-    //          publication.create().await.unwrap();
-    //      }
-    //
-    //      //create a slot if not exist subscribe to the publication
-    //      let slot_name = format!("{}{}", SLOT_PREFIX, index_setting.get_index_name());
-    //      let repl_client = Arc::new(
-    //          DBClient::new(&format!("{} replication=database", db_string))
-    //              .await
-    //              .unwrap()
-    //              .client,
-    //      );
-    //      let mut slot = Slot::new(Arc::clone(&repl_client), &slot_name);
-    //      slot.get_confirmed_lsn().await.unwrap();
-    //      if slot.lsn.is_none() {
-    //          println!("Replication slot {slot_name} does not exist - Creating replication slot: {slot_name}");
-    //          slot.create().await.unwrap();
-    //      }
-    //
-    //      let mut event_notifier = ReplicationEventNotifier::new(
-    //          Arc::clone(&repl_client),
-    //          slot,
-    //          publication
-    //      );
-    //      event_notifier.start_listening(event_sender).await;
-    //
-    // }
-
     async fn create_connection(&self) -> PgPool {
         let data_source_config = &self.data_source_config;
         let db_url = format!("postgresql://{}:{}@{}:{}/{}",
@@ -139,12 +92,13 @@ impl Publication {
         client: Arc<tokio_postgres::Client>,
         schema_name: &String,
         table_name: &String,
+        publish_cols: Vec<String>
     ) -> Self {
         Self {
             client,
             schema_name: schema_name.clone(),
             table_name: table_name.clone(),
-            table_cols: vec![],
+            publish_cols,
         }
     }
 
@@ -184,56 +138,30 @@ impl Publication {
         }
     }
 
-    pub async fn create(&self) -> Result<u64, tokio_postgres::Error> {
-        let query = format!(
-            "CREATE PUBLICATION {} FOR TABLE {} WITH (publish = 'insert, update, delete')",
-            self.pub_name(),
-            self.table_name
-        );
+    pub async fn create(&self, pg_version: f32) -> Result<u64, tokio_postgres::Error> {
+
+        //from postgres version 15 and above, we can config which fields to publish
+        let query = if pg_version > 15.0 && self.publish_cols.len() > 0 {
+            let mut registered_fields = String::new();
+            registered_fields.push_str(&self.publish_cols.join(", ").as_str());
+            format!(
+                "CREATE PUBLICATION {} FOR TABLE {} ({})",
+                self.pub_name(),
+                self.table_name,
+                registered_fields
+            )
+        }else {
+            format!(
+                "CREATE PUBLICATION {} FOR TABLE {}",
+                self.pub_name(),
+                self.table_name,
+            )
+        };
+
         println!("Creating publication: {:?}", query);
         let result = self.client.execute(&query, &[]).await?;
         println!("Created publication: {:?}", result);
         Ok(result)
-    }
-
-    pub async fn get_columns(&mut self) -> Result<(), tokio_postgres::Error> {
-        let query = "WITH primary_key_info AS
-        (SELECT tc.constraint_schema,
-                tc.table_name,
-                ccu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.constraint_column_usage AS ccu USING (CONSTRAINT_SCHEMA, CONSTRAINT_NAME)
-        WHERE constraint_type = 'PRIMARY KEY' )
-    SELECT
-        c.column_name,
-        c.data_type,
-        c.is_nullable = 'YES' AS is_nullable,
-        pki.column_name IS NOT NULL AS is_primary
-    FROM information_schema.columns AS c
-    LEFT JOIN primary_key_info pki ON c.table_schema = pki.constraint_schema
-        AND pki.table_name = c.table_name
-        AND pki.column_name = c.column_name
-    WHERE c.table_name = $1;
-    ";
-
-        let res = self.client.query(query, &[&self.table_name]).await?;
-        let cols = res
-            .into_iter()
-            .map(|row| {
-                let name = row.get::<_, String>("column_name");
-                let data_type = row.get::<_, String>("data_type");
-                let is_nullable = row.get::<_, bool>("is_nullable");
-                let is_primary = row.get::<_, bool>("is_primary");
-                Column {
-                    name,
-                    data_type,
-                    is_nullable,
-                    is_primary,
-                }
-            })
-            .collect::<Vec<_>>();
-        self.table_cols = cols;
-        Ok(())
     }
 }
 
@@ -310,10 +238,11 @@ impl ReplicationEventNotifier{
         slot: Slot,
         publication: Publication,
     ) -> Self{
+
         Self {
             schema_name: publication.schema_name.clone(),
             table_name: publication.table_name.clone(),
-            table_cols: publication.table_cols.clone(),
+            registered_cols: publication.publish_cols.clone(),
             // lsn must be assigned at this point else we panic
             commit_lsn: slot.lsn.unwrap().clone(),
             slot_name: slot.name.clone(),
@@ -322,7 +251,6 @@ impl ReplicationEventNotifier{
         }
     }
 
-    //todo: only listening changes from registered columns
     async fn start_listening(&mut self, event_sender: Sender<EventMessage>){
         let full_table_name = format!("{}.{}", self.schema_name, self.table_name);
         let wal2json_options = vec![
@@ -364,9 +292,8 @@ impl ReplicationEventNotifier{
                     self.process_wal2json_event(&event, event_sender.clone()).await;
                 }
                 Some(Err(e)) => {
-                    //todo: panic here??
-                    println!("Error reading from stream:{}", e);
-                    continue;
+                    //todo: panic or try to recover?
+                    panic!("Error reading from stream: {}", e);
                 }
                 None => {
                     //todo: panic here??
@@ -375,7 +302,6 @@ impl ReplicationEventNotifier{
                 }
             }
         }
-
     }
 
     // this function process WAL event decoded by wal2json plugin
@@ -404,7 +330,7 @@ impl ReplicationEventNotifier{
     async fn process_change_event(&mut self, record: Value, event_sender: Sender<EventMessage>) {
         match record["action"].as_str().unwrap() {
             "B" => {
-                println!("Begin===");
+                // println!("Begin===");
                 // println!("{}", serde_json::to_string_pretty(&record).unwrap());
                 let lsn_str = record["nextlsn"].as_str().unwrap();
                 self.commit_lsn = lsn_str.parse::<PgLsn>().unwrap();
@@ -418,9 +344,8 @@ impl ReplicationEventNotifier{
                         record["nextlsn"]
                     );
                 }
-                println!("Commit===");
+                // println!("Commit===");
                 // println!("{}", serde_json::to_string_pretty(&record).unwrap());
-
                 self.commit().await;
             }
             "I" => {        //insert event
@@ -447,7 +372,13 @@ impl ReplicationEventNotifier{
                 for column in columns.iter(){
                     let column_name = column.get("name").unwrap().as_str().unwrap();
                     let column_value = column.get("value").unwrap().to_string();
-                    map.insert(column_name.parse().unwrap(), column_value.parse().unwrap());
+                    println!("Col name: {} - value: {}", column_name, column_value.as_str());
+                    if self.registered_cols.iter().any(|col_name| col_name == column_name){
+                        map.insert(column_name.parse().unwrap(), column_value.parse().unwrap());
+                    }else {
+                        //ignore event from unregistered fields
+                        return;
+                    }
                 }
                 let json_obj =  Value::Object(map);
                 let table_name = record["table"].as_str().unwrap();
@@ -461,7 +392,7 @@ impl ReplicationEventNotifier{
             }
             "D" => {        //delete event
                 let pk_key = record["identity"].get(0).unwrap().get("name").unwrap().as_str().unwrap();
-                let value =  record["identity"].get(0).unwrap().get("value").unwrap().to_string();
+                let value = record["identity"].get(0).unwrap().get("value");
                 let table_name = record["table"].as_str().unwrap();
                 let deleted_record = json!({ pk_key: value });
                 let delete_message = EventMessage{
@@ -549,6 +480,22 @@ fn prepare_standby_status_update(write_lsn: PgLsn) -> Bytes {
 }
 #[async_trait]
 impl DataSource for Postgres {
+    async fn get_version(&self) -> f32 {
+        let pg_pool = self.create_connection().await;
+        let pg_version_str: String = sqlx::query_scalar("SHOW server_version").fetch_one(&pg_pool).await.expect("Can not get Postgres SQL version");
+        let re = Regex::new(r"(?P<version>\d+\.\d+)").unwrap();
+        if let Some(captures) = re.captures(pg_version_str.as_str()) {
+            if let Some(version) = captures.name("version") {
+                let version_value = version.as_str().parse::<f32>().unwrap();
+                version_value
+            }else {
+                0.0
+            }
+        }else {
+            0.0
+        }
+    }
+
     async fn get_total_record_num(&self) -> i64 {
         let pg_pool = self.create_connection().await;
         let table_name = self.get_index_setting().get_index_name();
@@ -559,6 +506,7 @@ impl DataSource for Postgres {
 
     //todo: more thinking here, this function must be supper fast !!!!
      async fn get_full_data(&self, size: i64) -> Vec<Value>{
+        let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let total_records = self.get_total_record_num().await;
         println!("Total record need to be sync: {} from table: {}", total_records, &self.index_setting.get_index_name());
 
@@ -609,6 +557,9 @@ impl DataSource for Postgres {
             offset += size;
             current_page += 1;
         }
+        let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let time = end - start;
+        println!("TIME TO ADD: {}", time);
 
         return pg_total_records.lock().unwrap().to_vec();
     }
@@ -626,9 +577,23 @@ impl DataSource for Postgres {
         //create a Postgres publication if not exist
         let client = Arc::new(DBClient::new(db_string.as_str()).await.unwrap().client);
         let schema_name = "public".to_string();
-        let publication = Publication::new(Arc::clone(&client), &schema_name, index_setting.get_index_name());
+         let publish_cols: Vec<String> = index_setting.get_sync_fields()
+             .as_ref()
+             .unwrap()
+             .iter()
+             .map(|col_name| col_name.to_string())
+             .collect::<Vec<_>>();
+
+        let mut publication = Publication::new(
+            Arc::clone(&client),
+            &schema_name,
+            index_setting.get_index_name(),
+            publish_cols
+        );
+
         if !publication.check_exists().await.unwrap() {
-            publication.create().await.unwrap();
+            let pg_version = self.get_version().await;
+            publication.create(pg_version).await.unwrap();
         }
 
         //create a slot if not exist subscribe to the publication
@@ -651,7 +616,8 @@ impl DataSource for Postgres {
             slot,
             publication
         );
-        event_notifier.start_listening(event_sender).await;
+
+         event_notifier.start_listening(event_sender).await;
 
     }
 

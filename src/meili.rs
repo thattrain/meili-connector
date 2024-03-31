@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use meilisearch_sdk::Client;
+use meilisearch_sdk::{Client, Error, TaskInfo};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -42,27 +42,45 @@ impl MeiliSearchService{
        Some(&self.meili_client)
     }
 
-    // region handle meili event
+    //region handle meili indexes
+
+    //todo: impl create with search config and swap meili indexes
+
+
+    //endregion handle meili indexes
+
+
+
+    // region handle meili documents
     pub async fn handle_event(&self, event_message: EventMessage, index_setting: IndexSetting){
         let documents = event_message.payload;
-        println!("Record: {:?}", &documents);
+        // println!("Record: {:?}", &documents);
         match event_message.event_type {
             Insert => {
-                println!("Handle add document to Meilisearch ...");
-                self.add_documents(&index_setting, documents.as_ref()).await;
+                println!("Handle insert document to Meilisearch ...");
+               match self.add_documents(&index_setting, documents.as_ref()).await {
+                   Ok(task_info) => println!("Task info: {:?}", task_info),
+                   Err(err) => println!("Error when insert to meili: {}", err)
+               }
             },
             Update => {
                 println!("Handle update Meilisearch documents ...");
-                self.update_document(&index_setting, documents.as_ref()).await;
+                match self.update_document(&index_setting, documents.as_ref()).await {
+                    Ok(task_info) => println!("Task info: {:?}", task_info),
+                    Err(err) => println!("Error when update to meili: {}", err)
+                }
             },
             Delete => {
                 println!("Handle delete document from Meilisearch ...");
-                self.delete_documents(&index_setting, documents.as_ref()).await;
+                match self.delete_documents(&index_setting, documents.as_ref()).await {
+                    Ok(task_info) => println!("Task info: {:?}", task_info),
+                    Err(err) => println!("Error when delete to meili: {}", err)
+                }
             }
         }
     }
 
-    async fn add_documents(&self, index_setting: &IndexSetting, documents: &Vec<Value>) {
+    async fn add_documents(&self, index_setting: &IndexSetting, documents: &Vec<Value>) -> Result<TaskInfo, Error>{
          let meili_client = self.get_meili_client();
          if !meili_client.is_none() {
              let index = meili_client.unwrap().index(index_setting.get_index_name());
@@ -72,20 +90,23 @@ impl MeiliSearchService{
                  ndjson.push_str(serde_json::to_string(document).unwrap().as_str());
                  ndjson.push_str("\n");
              }
-             index
+             let task_info =  index
                  .add_documents_ndjson(Box::leak(ndjson.into_boxed_str()).as_bytes(), Some(pk_key))
                  .await
-                 .unwrap()
-                 .wait_for_completion(meili_client.unwrap(), None, None)
-                 .await
                  .unwrap();
-             println!("Insert successfully to Meilisearch !!!!");
+             Ok(task_info)
+         }else {
+             Err(Error::InvalidRequest)
          }
 
+
     }
-    async fn delete_documents(&self, index_setting: &IndexSetting, documents: &Vec<Value>){
+    async fn delete_documents(&self, index_setting: &IndexSetting, documents: &Vec<Value>) -> Result<TaskInfo, Error>{
         let meili_client = self.get_meili_client();
         if !meili_client.is_none() {
+            for document in documents{
+                println!("Document need to be delete: {:?}", document);
+            }
             let index = meili_client.unwrap().index(index_setting.get_index_name());
             let pk_key = index_setting.get_primary_key();
 
@@ -94,18 +115,22 @@ impl MeiliSearchService{
                 .map(|document| document.get(pk_key).unwrap().to_string())
                 .collect::<Vec<_>>();
 
-            index.delete_documents(&document_ids)
-                .await
-                .unwrap()
-                .wait_for_completion(&meili_client.unwrap(), None, None)
+            for id in &document_ids{
+                println!("Delete document id: {}", id);
+            }
+
+            let task_info = index
+                .delete_documents(&document_ids)
                 .await
                 .unwrap();
-            println!("Delete documents successfully from Meilisearch !!!");
+            Ok(task_info)
+        }else {
+            Err(Error::InvalidRequest)
         }
 
     }
 
-    async fn update_document(&self, index_setting: &IndexSetting, documents: &Vec<Value>){
+    async fn update_document(&self, index_setting: &IndexSetting, documents: &Vec<Value>) -> Result<TaskInfo, Error>{
         let meili_client = self.get_meili_client();
         if !meili_client.is_none() {
             let index = meili_client.unwrap().index(index_setting.get_index_name());
@@ -115,17 +140,16 @@ impl MeiliSearchService{
                 ndjson.push_str(serde_json::to_string(document).unwrap().as_str());
                 ndjson.push_str("\n");
             }
-            index
+            let task_info = index
                 .update_documents_ndjson(Box::leak(ndjson.into_boxed_str()).as_bytes(), Some(pk_key))
                 .await
-                .unwrap()
-                .wait_for_completion(meili_client.unwrap(), None, None)
-                .await
                 .unwrap();
-            println!("Insert successfully to Meilisearch !!!!");
+            Ok(task_info)
+        }else {
+            Err(Error::InvalidRequest)
         }
     }
 
 
-    // endregion handle meili event
+    // endregion handle meili document
 }

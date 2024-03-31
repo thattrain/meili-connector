@@ -1,7 +1,7 @@
 pub enum AuthError{
     MissingMasterKey
 }
-pub enum PrimaryKeyError{
+pub enum MeiliError{
     IndexPrimaryKeyMultipleCandidateFound,
     IndexPrimaryKeyNoCandidateFound,
     InvalidDocumentId,
