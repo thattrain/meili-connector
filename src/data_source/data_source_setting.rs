@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use crate::data_source::SupportedDataSource;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct DataSourceConfig{
     source_type:  SupportedDataSource,
     host: String,
@@ -12,7 +13,7 @@ pub struct DataSourceConfig{
 }
 
 impl DataSourceConfig {
-    pub fn get_data_source(&self) -> &SupportedDataSource{
+    pub fn get_source_type(&self) -> &SupportedDataSource{
         &self.source_type
     }
     pub fn get_host(&self) -> &String{

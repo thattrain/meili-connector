@@ -1,5 +1,4 @@
 use std::{
-    fmt::format,
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
@@ -8,10 +7,7 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::{
-    future::{self},
-    ready, Sink, StreamExt,
-};
+use futures::{future::{self}, ready, Sink, StreamExt};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use sqlx::{Executor, PgPool};
@@ -23,9 +19,10 @@ use crate::data_source::DataSource;
 use crate::data_source::deserializer::SerMapPgRow;
 use crate::meili::EventMessage;
 use crate::meili::index_setting::IndexSetting;
-use crate::meili::meili_enum::Event::*;
+use crate::meili::Event::*;
 
 type JsonValues = Arc<Mutex<Vec<Value>>>;
+
 const SECONDS_FROM_UNIX_EPOCH_TO_2000: u128 = 946684800;
 const SLOT_PREFIX: &str = "meili_";
 
@@ -145,14 +142,14 @@ impl Publication {
             let mut registered_fields = String::new();
             registered_fields.push_str(&self.publish_cols.join(", ").as_str());
             format!(
-                "CREATE PUBLICATION {} FOR TABLE {} ({})",
+                "CREATE PUBLICATION \"{}\" FOR TABLE {} ({})",
                 self.pub_name(),
                 self.table_name,
                 registered_fields
             )
         }else {
             format!(
-                "CREATE PUBLICATION {} FOR TABLE {}",
+                "CREATE PUBLICATION \"{}\" FOR TABLE {}",
                 self.pub_name(),
                 self.table_name,
             )
@@ -480,7 +477,7 @@ fn prepare_standby_status_update(write_lsn: PgLsn) -> Bytes {
 }
 #[async_trait]
 impl DataSource for Postgres {
-    async fn get_version(&self) -> f32 {
+    async fn version(&self) -> f32 {
         let pg_pool = self.create_connection().await;
         let pg_version_str: String = sqlx::query_scalar("SHOW server_version").fetch_one(&pg_pool).await.expect("Can not get Postgres SQL version");
         let re = Regex::new(r"(?P<version>\d+\.\d+)").unwrap();
@@ -496,7 +493,7 @@ impl DataSource for Postgres {
         }
     }
 
-    async fn get_total_record_num(&self) -> i64 {
+    async fn total_record(&self) -> i64 {
         let pg_pool = self.create_connection().await;
         let table_name = self.get_index_setting().get_index_name();
         let query= format!("SELECT COUNT (*) FROM {}", table_name);
@@ -504,23 +501,7 @@ impl DataSource for Postgres {
         return count;
     }
 
-    //todo: more thinking here, this function must be supper fast !!!!
-     async fn get_full_data(&self, size: i64) -> Vec<Value>{
-        let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let total_records = self.get_total_record_num().await;
-        println!("Total record need to be sync: {} from table: {}", total_records, &self.index_setting.get_index_name());
-
-        let mut offset: i64 = 0;
-        let mut current_page = 0;
-        let total_page = if total_records % size == 0 {
-            (total_records / size) as f64
-        }  else {
-            ((total_records / size) as f64).round()
-        };
-
-        //todo: should we use tokio::stream instead ?????
-        let pg_total_records: JsonValues = Arc::new(Mutex::new(Vec::new()));
-
+     async fn get_data(&self, size: i64, offset: i64) -> Vec<Value>{
          let sync_fields = self.get_index_setting().get_sync_fields().as_ref().unwrap();
          let mut fields = String::new();
          if sync_fields.len() > 0 {
@@ -529,42 +510,25 @@ impl DataSource for Postgres {
              fields.push_str("*");
          }
 
-        while current_page < total_page as i64 {
-            let pg_pool = self.create_connection().await;
-            let index_setting = self.index_setting.clone();
-            let query_fields = fields.clone();
+        let pg_pool = self.create_connection().await;
+        let mut result = Vec::new();
+        let query= format!("SELECT {} FROM \"{}\" ORDER BY {} LIMIT {} OFFSET {}",
+                           fields,
+                           &self.index_setting.get_index_name(),
+                           &self.index_setting.get_primary_key(),
+                           size, offset
+        );
 
-            //spawn a new task to query by limit and offset
-            let mut query_result = tokio::spawn(async move {
-                let query= format!("SELECT {} FROM {} ORDER BY {} LIMIT {} OFFSET {}",
-                                   query_fields,
-                                   &index_setting.get_index_name(),
-                                   &index_setting.get_primary_key(),
-                                   size, offset
-                );
-
-                let rows = pg_pool.fetch_all(query.as_str()).await.unwrap();
-                let mut result = Vec::new();
-                for row in rows{
-                    let row = SerMapPgRow::from(row);
-                    let json_row: Value = serde_json::to_value(&row).unwrap();
-                    result.push(json_row);
-                }
-                result
-            }).await.expect("Error when query full data from Postgres database");
-
-            pg_total_records.lock().unwrap().append(&mut query_result);
-            offset += size;
-            current_page += 1;
+        let rows = pg_pool.fetch_all(query.as_str()).await.expect("Can not query Postgres !!!");
+        for row in rows{
+            let row = SerMapPgRow::from(row);
+            let json_row: Value = serde_json::to_value(&row).unwrap();
+            result.push(json_row);
         }
-        let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let time = end - start;
-        println!("TIME TO ADD: {}", time);
-
-        return pg_total_records.lock().unwrap().to_vec();
+         return result;
     }
 
-     async fn start_event_notifier(&self, index_setting: IndexSetting, data_source_config: DataSourceConfig, event_sender: Sender<EventMessage>){
+    async fn start_event_notifier(&self, index_setting: &IndexSetting, data_source_config: &DataSourceConfig, event_sender: Sender<EventMessage>){
 
         let db_string = format!("user={} password={} host={} port={} dbname={}",
                                 data_source_config.get_username(),
@@ -592,7 +556,7 @@ impl DataSource for Postgres {
         );
 
         if !publication.check_exists().await.unwrap() {
-            let pg_version = self.get_version().await;
+            let pg_version = self.version().await;
             publication.create(pg_version).await.unwrap();
         }
 
@@ -617,6 +581,7 @@ impl DataSource for Postgres {
             publication
         );
 
+         println!("Start event listener for table: {}", index_setting.get_index_name());
          event_notifier.start_listening(event_sender).await;
 
     }

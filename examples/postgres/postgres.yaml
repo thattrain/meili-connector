@@ -1,0 +1,24 @@
+meilisearch:
+  apiUrl: http://localhost:7700
+  adminApiKey: "4d210c85a27082683758d083d6c1298ee7e1e97385edeaad3250b9cd8aebd276"
+dataSource:
+  sourceType: Postgres
+  host: localhost
+  port: 5432
+  username: dattran
+  password: dattran
+  database: postgres
+synchronizeTables:
+  - indexName: users
+    primaryKey: user_id
+    limit: 1000
+    syncFields:
+      - user_id
+      - username
+      - created_at
+    meiliSetting:
+      displayedAttributes:
+        - user_id
+        - username
+      searchableAttributes:
+        - username

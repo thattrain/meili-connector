@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Read;
-use owo_colors::{DynColors, OwoColorize};
+use owo_colors::{OwoColorize};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{self};
 use crate::meili::meili_config::MeiliConfig;
@@ -8,6 +8,7 @@ use crate::data_source::data_source_setting::DataSourceConfig;
 use crate::meili::index_setting::IndexSetting;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Config{
     pub meilisearch: MeiliConfig,
     pub data_source: DataSourceConfig,
@@ -23,9 +24,9 @@ impl Config{
         println!("{}\n\n\n", banner.truecolor(255,0,255). bold());
     }
 
-    pub fn read_config(file_name: String) -> Self{
+    pub fn read_config(file_name: &str) -> Self{
         let file = File::open(file_name).expect("Can not open config file");
-        let config: Config = serde_yaml::from_reader(file).expect("Could not read value from config file");
+        let config: Config = serde_yaml::from_reader(file).expect("Failed to parse config from file");
         return config;
     }
 

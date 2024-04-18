@@ -1,17 +1,21 @@
 use std::sync::{Arc, OnceLock};
 
-use meilisearch_sdk::{Client, Error, TaskInfo};
-use serde::Serialize;
+use meilisearch_sdk::{Client, Error, ErrorCode, Index, TaskInfo};
 use serde_json::Value;
 
 use crate::meili::index_setting::IndexSetting;
 use crate::meili::meili_config::MeiliConfig;
-use crate::meili::meili_enum::Event;
-use crate::meili::meili_enum::Event::*;
 
 pub mod meili_config;
 pub mod index_setting;
-pub mod meili_enum;
+
+
+#[derive(Debug)]
+pub enum Event {
+    Insert,
+    Update,
+    Delete
+}
 
 pub struct MeiliSearchService {
      meili_client: Client,
@@ -23,7 +27,7 @@ pub struct EventMessage {
     pub payload: Arc<Vec<Value>>
 }
 
-//todo: handle errors
+
 impl MeiliSearchService{
     pub fn get_meili_service(meili_config: MeiliConfig) -> &'static MeiliSearchService{
         static INSTANCE: OnceLock<MeiliSearchService> = OnceLock::new();
@@ -35,45 +39,88 @@ impl MeiliSearchService{
         })
     }
 
-     pub fn get_meili_client(&self) -> Option<&Client>{
+     fn get_meili_client(&self) -> Option<&Client>{
         if Some(self).is_none(){
             return None;
         }
        Some(&self.meili_client)
     }
 
+
+
     //region handle meili indexes
+    pub async fn initialize_index(&self, index_setting: &IndexSetting) -> Index{
+       let index_name = index_setting.get_index_name().as_str();
+       let client = self.get_meili_client();
 
-    //todo: impl create with search config and swap meili indexes
+       if client.is_none() {
+           panic!("Can not create connection to Meilisearch instance");
+       }
 
+       match client.unwrap().get_index(index_name).await {
+           Ok(index) => {
+               match index_setting.get_meili_setting() {
+                   Some(meili_settings) => { index.set_settings(meili_settings).await.unwrap(); },
+                   None => { println!("None Meilisearch settings were set on index: {}", index_setting.get_index_name()) }
+               }
+               println!("Meilisearch index: '{}' already exits", index_name);
+               index
+           },
+           Err(err) => match err {
+               Error::Meilisearch(ref error) => {
+                    if error.error_code == ErrorCode::IndexNotFound{
+                        println!("Create new meilisearch index: '{}'", index_name);
+                        let meili_client = client.unwrap();
+                        let index = meili_client
+                            .create_index(index_name, Some(index_setting.get_primary_key()))
+                            .await
+                            .unwrap()
+                            .wait_for_completion(meili_client, None, None)
+                            .await
+                            .unwrap()
+                            .try_make_index(&meili_client)
+                            .unwrap();
 
+                        match index_setting.get_meili_setting() {
+                            Some(meili_settings) => { index.set_settings(meili_settings).await.unwrap(); },
+                            None => { println!("None Meilisearch settings were set on index: {}", index_setting.get_index_name()) }
+                        }
+                        index
+                    }else {
+                        panic!("Unknown error: {:?}", err);
+                    }
+               },
+               _ => {
+                   panic!("Unknown error: {:?}", err);
+               }
+           }
+       }
+
+    }
     //endregion handle meili indexes
 
 
 
     // region handle meili documents
-    pub async fn handle_event(&self, event_message: EventMessage, index_setting: IndexSetting){
+    pub async fn handle_event(&self, event_message: EventMessage, index_setting: &IndexSetting){
         let documents = event_message.payload;
         // println!("Record: {:?}", &documents);
         match event_message.event_type {
-            Insert => {
-                println!("Handle insert document to Meilisearch ...");
-               match self.add_documents(&index_setting, documents.as_ref()).await {
-                   Ok(task_info) => println!("Task info: {:?}", task_info),
+            Event::Insert => {
+               match self.add_documents(index_setting, documents.as_ref()).await {
+                   Ok(task_info) => println!("Insert: {:?}", task_info),
                    Err(err) => println!("Error when insert to meili: {}", err)
                }
             },
-            Update => {
-                println!("Handle update Meilisearch documents ...");
-                match self.update_document(&index_setting, documents.as_ref()).await {
-                    Ok(task_info) => println!("Task info: {:?}", task_info),
+            Event::Update => {
+                match self.update_document(index_setting, documents.as_ref()).await {
+                    Ok(task_info) => println!("Delete: {:?}", task_info),
                     Err(err) => println!("Error when update to meili: {}", err)
                 }
             },
-            Delete => {
-                println!("Handle delete document from Meilisearch ...");
-                match self.delete_documents(&index_setting, documents.as_ref()).await {
-                    Ok(task_info) => println!("Task info: {:?}", task_info),
+            Event::Delete => {
+                match self.delete_documents(index_setting, documents.as_ref()).await {
+                    Ok(task_info) => println!("Update: {:?}", task_info),
                     Err(err) => println!("Error when delete to meili: {}", err)
                 }
             }
