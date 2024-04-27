@@ -23,20 +23,20 @@ Synchronize your datasource (currently support PostgresSQL) with Meilisearch ins
 
 #### In Red Hat/CentOS:
 
-```
-$ sudo yum install wal2json14
+```bash
+sudo yum install wal2json14
 ```
 
 #### In Debian/Ubuntu:
 
-```
-$ sudo apt-get install postgresql-14-wal2json
+```bash
+sudo apt-get install postgresql-14-wal2json
 ```
 
 #### In MacOS:
 
-```
-$ brew install wal2json
+```bash
+brew install wal2json
 ```
 </li>
     <li> Make sure to config Postgres wal_level and have enough replication slot: </li>
@@ -58,27 +58,59 @@ max_wal_senders = 10
 ## Meilisearch:
 Make sure to cover core concepts of Meilisearch such as index, document, index policy and more at: https://www.meilisearch.com/docs
 
-## Configuration
+## How to build
+
+```bash
+cargo build --release
+```
+
+## How to run
+<ul>
+<li> Show help
+
+</li>
+
+```bash
+cargo run -- -h
+```
+
+<li> Sync data
+
+```bash
+cargo run -- --config <path> syn
+```
+
+</li>
+
+</ul>
+
+## Configuration file example
 
 ```yaml
 meilisearch:
-  api_url: http://localhost:7700
-  admin_api_key: "4d210c85a27082683758d083d6c1298ee7e1e97385edeaad3250b9cd8aebd276"
-  upload_size: 2
-data_source:
-  source_type: PostgresSQL
+  apiUrl: http://localhost:7700
+  adminApiKey: "4d210c85a27082683758d083d6c1298ee7e1e97385edeaad3250b9cd8aebd276"
+dataSource:
+  sourceType: Postgres
   host: localhost
   port: 5432
   username: dattran
   password: dattran
   database: postgres
-synchronize_tables:
-  - index_name: users
-    primary_key: user_id
-    sync_fields:
+synchronizeTables:
+  - indexName: users
+    primaryKey: user_id
+    limit: 1000
+    syncFields:
       - user_id
       - username
       - created_at
+    meiliSetting:
+      displayedAttributes:
+        - user_id
+        - username
+      searchableAttributes:
+        - username
 ```
 <strong>* Note: This is a POC and still in development process. Base source can change drastically in the future, please consider to use in production environment with real data.</strong>
 

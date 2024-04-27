@@ -1,4 +1,5 @@
 use std::sync::{Arc, OnceLock};
+use log::{debug, error, info};
 
 use meilisearch_sdk::{Client, Error, ErrorCode, Index, TaskInfo};
 use serde_json::Value;
@@ -29,7 +30,7 @@ pub struct EventMessage {
 
 
 impl MeiliSearchService{
-    pub fn get_meili_service(meili_config: MeiliConfig) -> &'static MeiliSearchService{
+    pub fn get_meili_service(meili_config: &MeiliConfig) -> &'static MeiliSearchService{
         static INSTANCE: OnceLock<MeiliSearchService> = OnceLock::new();
         INSTANCE.get_or_init(|| {
             let client = Client::new(meili_config.get_api_url(), meili_config.get_admin_api_key().as_ref());
@@ -63,13 +64,13 @@ impl MeiliSearchService{
                    Some(meili_settings) => { index.set_settings(meili_settings).await.unwrap(); },
                    None => { println!("None Meilisearch settings were set on index: {}", index_setting.get_index_name()) }
                }
-               println!("Meilisearch index: '{}' already exits", index_name);
+               info!("Meilisearch index: '{}' already exits", index_name);
                index
            },
            Err(err) => match err {
                Error::Meilisearch(ref error) => {
                     if error.error_code == ErrorCode::IndexNotFound{
-                        println!("Create new meilisearch index: '{}'", index_name);
+                        info!("Create new meilisearch index: '{}'", index_name);
                         let meili_client = client.unwrap();
                         let index = meili_client
                             .create_index(index_name, Some(index_setting.get_primary_key()))
@@ -83,7 +84,7 @@ impl MeiliSearchService{
 
                         match index_setting.get_meili_setting() {
                             Some(meili_settings) => { index.set_settings(meili_settings).await.unwrap(); },
-                            None => { println!("None Meilisearch settings were set on index: {}", index_setting.get_index_name()) }
+                            None => { debug!("None Meilisearch settings were set on index: {}", index_setting.get_index_name()) }
                         }
                         index
                     }else {
@@ -108,20 +109,20 @@ impl MeiliSearchService{
         match event_message.event_type {
             Event::Insert => {
                match self.add_documents(index_setting, documents.as_ref()).await {
-                   Ok(task_info) => println!("Insert: {:?}", task_info),
-                   Err(err) => println!("Error when insert to meili: {}", err)
+                   Ok(task_info) => debug!("Insert: {:?}", task_info),
+                   Err(err) => error!("Error when insert to meili: {}", err)
                }
             },
             Event::Update => {
                 match self.update_document(index_setting, documents.as_ref()).await {
-                    Ok(task_info) => println!("Delete: {:?}", task_info),
-                    Err(err) => println!("Error when update to meili: {}", err)
+                    Ok(task_info) => debug!("Delete: {:?}", task_info),
+                    Err(err) => error!("Error when update to meili: {}", err)
                 }
             },
             Event::Delete => {
                 match self.delete_documents(index_setting, documents.as_ref()).await {
-                    Ok(task_info) => println!("Update: {:?}", task_info),
-                    Err(err) => println!("Error when delete to meili: {}", err)
+                    Ok(task_info) => debug!("Update: {:?}", task_info),
+                    Err(err) => error!("Error when delete to meili: {}", err)
                 }
             }
         }
@@ -151,9 +152,6 @@ impl MeiliSearchService{
     async fn delete_documents(&self, index_setting: &IndexSetting, documents: &Vec<Value>) -> Result<TaskInfo, Error>{
         let meili_client = self.get_meili_client();
         if !meili_client.is_none() {
-            for document in documents{
-                println!("Document need to be delete: {:?}", document);
-            }
             let index = meili_client.unwrap().index(index_setting.get_index_name());
             let pk_key = index_setting.get_primary_key();
 
@@ -161,10 +159,6 @@ impl MeiliSearchService{
                 .iter()
                 .map(|document| document.get(pk_key).unwrap().to_string())
                 .collect::<Vec<_>>();
-
-            for id in &document_ids{
-                println!("Delete document id: {}", id);
-            }
 
             let task_info = index
                 .delete_documents(&document_ids)

@@ -2,6 +2,8 @@
 name = "meili-connector"
 version = "0.1.0"
 edition = "2021"
+authors = ["dattran"]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,5 +19,9 @@ sqlx = { version = "0.7.4", features = ["runtime-tokio-rustls", "postgres", "uui
 futures = { version = "0.3.25", features = ["executor"] }
 async-trait = "0.1.74"
 bytes = "1.5.0"
-owo-colors = "=1.3.0"
+owo-colors = "4.0.0"
 regex = "1.10.4"
+clap = { version = "4.5.4", features = ["derive"] }
+env_logger = "0.11.3"
+log = "0.4.21"
+

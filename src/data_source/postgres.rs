@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::Poll,
     time::{SystemTime, UNIX_EPOCH}
 };
@@ -8,6 +8,7 @@ use std::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{future::{self}, ready, Sink, StreamExt};
+use log::{debug, error, info, warn};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use sqlx::{Executor, PgPool};
@@ -17,11 +18,9 @@ use tokio_postgres::{CopyBothDuplex, NoTls, SimpleQueryMessage, types::PgLsn};
 use crate::data_source::data_source_setting::DataSourceConfig;
 use crate::data_source::DataSource;
 use crate::data_source::deserializer::SerMapPgRow;
+use crate::meili::Event::*;
 use crate::meili::EventMessage;
 use crate::meili::index_setting::IndexSetting;
-use crate::meili::Event::*;
-
-type JsonValues = Arc<Mutex<Vec<Value>>>;
 
 const SECONDS_FROM_UNIX_EPOCH_TO_2000: u128 = 946684800;
 const SLOT_PREFIX: &str = "meili_";
@@ -125,7 +124,7 @@ impl Publication {
         return if let Some(publication) = rows.first() {
             let schema_name = publication.get("schemaname").unwrap().to_string();
             let table_name = publication.get("tablename").unwrap().to_string();
-            println!(
+            debug!(
                 "Found publication {:?}/{:?}, ready to start replication",
                 schema_name, table_name
             );
@@ -155,9 +154,8 @@ impl Publication {
             )
         };
 
-        println!("Creating publication: {:?}", query);
         let result = self.client.execute(&query, &[]).await?;
-        println!("Created publication: {:?}", result);
+        debug!("Created publication: {:?}", result);
         Ok(result)
     }
 }
@@ -214,7 +212,7 @@ impl Slot {
             .get("consistent_point")
             .unwrap()
             .to_owned();
-        println!("Created replication slot: {:?}", lsn);
+        info!("Created replication slot: {:?}", lsn);
         self.lsn = Some(lsn.parse::<PgLsn>().unwrap());
         Ok(())
     }
@@ -294,7 +292,7 @@ impl ReplicationEventNotifier{
                 }
                 None => {
                     //todo: panic here??
-                    println!("Stream closed");
+                    error!("Stream closed");
                     break;
                 }
             }
@@ -315,7 +313,7 @@ impl ReplicationEventNotifier{
                 let last_byte = event.last().unwrap();
                 //if last_byte == 1 then reply this message immediately to void timeout disconnect
                 if last_byte == &1 {
-                    println!("Send keep alive message - @LSN:{:x?}", self.commit_lsn);
+                    debug!("Send keep alive message - @LSN:{:x?}", self.commit_lsn);
                     let buf = prepare_standby_status_update(self.commit_lsn);
                     self.send_standby_status_update(buf).await;
                 }
@@ -336,7 +334,7 @@ impl ReplicationEventNotifier{
                 let end_lsn_str = record["nextlsn"].as_str().unwrap();
                 let end_lsn = end_lsn_str.parse::<PgLsn>().unwrap();
                 if end_lsn != self.commit_lsn {
-                    println!(
+                    debug!(
                         "commit and begin next_lsn don't match: {:?}",
                         record["nextlsn"]
                     );
@@ -369,7 +367,7 @@ impl ReplicationEventNotifier{
                 for column in columns.iter(){
                     let column_name = column.get("name").unwrap().as_str().unwrap();
                     let column_value = column.get("value").unwrap().to_string();
-                    println!("Col name: {} - value: {}", column_name, column_value.as_str());
+                    debug!("Col name: {} - value: {}", column_name, column_value.as_str());
                     if self.registered_cols.iter().any(|col_name| col_name == column_name){
                         map.insert(column_name.parse().unwrap(), column_value.parse().unwrap());
                     }else {
@@ -401,7 +399,7 @@ impl ReplicationEventNotifier{
                 let _ = &event_sender.send(delete_message).await.unwrap();
             }
             _ => {
-                println!("unknown event: {}",  record["action"].as_str().unwrap());
+                warn!("unknown event: {}",  record["action"].as_str().unwrap());
             }
         }
     }
@@ -412,7 +410,7 @@ impl ReplicationEventNotifier{
     }
 
     async fn send_standby_status_update(&mut self, buf: Bytes) {
-        println!("Trying to send SSU");
+        debug!("Trying to send SSU");
         let mut next_step = 1;
         future::poll_fn(|cx| loop {
             // println!("Doing step:{}", next_step);
@@ -437,7 +435,7 @@ impl ReplicationEventNotifier{
             next_step += 1;
         })
             .await;
-        println!("Sent SSU");
+        debug!("Sent SSU");
     }
 
 
@@ -548,7 +546,7 @@ impl DataSource for Postgres {
              .map(|col_name| col_name.to_string())
              .collect::<Vec<_>>();
 
-        let mut publication = Publication::new(
+        let publication = Publication::new(
             Arc::clone(&client),
             &schema_name,
             index_setting.get_index_name(),
@@ -571,7 +569,7 @@ impl DataSource for Postgres {
         let mut slot = Slot::new(Arc::clone(&repl_client), &slot_name);
         slot.get_confirmed_lsn().await.unwrap();
         if slot.lsn.is_none() {
-            println!("Replication slot {slot_name} does not exist - Creating replication slot: {slot_name}");
+            info!("Replication slot {slot_name} does not exist - Creating replication slot: {slot_name}");
             slot.create().await.unwrap();
         }
 
@@ -581,7 +579,7 @@ impl DataSource for Postgres {
             publication
         );
 
-         println!("Start event listener for table: {}", index_setting.get_index_name());
+         info!("Start event listener for table: {}", index_setting.get_index_name());
          event_notifier.start_listening(event_sender).await;
 
     }

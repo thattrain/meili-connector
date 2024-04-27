@@ -1,4 +1,5 @@
 use std::sync::{Arc, OnceLock};
+use log::{debug, info};
 
 use tokio::sync::mpsc;
 
@@ -21,7 +22,7 @@ pub struct Synchronizer<'a> {
 
 impl Synchronizer<'static>{
     pub fn get_synchronizer<'a>(meili_config: MeiliConfig, data_source_config: DataSourceConfig, synchronize_tables: Vec<IndexSetting>) ->  &'static Synchronizer<'a> {
-        let mut meili_service: &'static MeiliSearchService = MeiliSearchService::get_meili_service(meili_config.clone());
+        let meili_service: &'static MeiliSearchService = MeiliSearchService::get_meili_service(&meili_config);
         static INSTANCE: OnceLock<Synchronizer> = OnceLock::new();
         INSTANCE.get_or_init(|| {
             Synchronizer{
@@ -45,7 +46,7 @@ impl Synchronizer<'static>{
                 if postgres.version().await < 12.0 {
                     panic!("Not support Postgres version below 12");
                 }
-                println!("Postgres version: {}", postgres.version().await);
+                info!("Postgres version: {}", postgres.version().await);
                 postgres
             }
         }
@@ -58,20 +59,19 @@ impl Synchronizer<'static>{
                let index_setting = self.get_index_setting_by_name(&event.index_name);
                match index_setting {
                    Some(index_setting) => self.meili_service.handle_event(event, index_setting).await,
-                   None => println!("Table {} was not registered for changes !!!", event.index_name)
+                   None => debug!("Table {} was not registered for changes !!!", event.index_name)
                }
            }
        });
 
        for index_setting in &self.synchronize_tables{
-
            //create meilisearch index before sync
             self.meili_service.initialize_index(index_setting).await;
 
            // query all data and start event listener
            let source = Arc::new(self.initialize_data_source(index_setting).await);
            let total_records = source.total_record().await;
-           println!("Total record need to be sync: {} from table: {}", total_records, index_setting.get_index_name());
+           info!("Total record need to be sync: {} from table: {}", total_records, index_setting.get_index_name());
            let limit = index_setting.get_limit();
            let mut current_page = 0;
            let mut offset = 0;
