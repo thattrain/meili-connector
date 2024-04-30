@@ -11,7 +11,7 @@ use futures::{future::{self}, ready, Sink, StreamExt};
 use log::{debug, error, info, warn};
 use regex::Regex;
 use serde_json::{json, Map, Value};
-use sqlx::{Executor, PgPool};
+use sqlx::{Error, Executor, PgPool};
 use tokio::sync::mpsc::Sender;
 use tokio_postgres::{CopyBothDuplex, NoTls, SimpleQueryMessage, types::PgLsn};
 
@@ -323,6 +323,8 @@ impl ReplicationEventNotifier{
     }
 
     async fn process_change_event(&mut self, record: Value, event_sender: Sender<EventMessage>) {
+        // error!("{}", serde_json::to_string_pretty(&record).unwrap());
+        // TODO: handle events when receive commit msg
         match record["action"].as_str().unwrap() {
             "B" => {
                 // println!("Begin===");
@@ -399,7 +401,7 @@ impl ReplicationEventNotifier{
                 let _ = &event_sender.send(delete_message).await.unwrap();
             }
             _ => {
-                warn!("unknown event: {}",  record["action"].as_str().unwrap());
+                warn!("unknown event: {}",  serde_json::to_string_pretty(&record).unwrap());
             }
         }
     }
@@ -491,15 +493,23 @@ impl DataSource for Postgres {
         }
     }
 
-    async fn total_record(&self) -> i64 {
+    async fn total_record(&self) -> usize {
         let pg_pool = self.create_connection().await;
         let table_name = self.get_index_setting().get_index_name();
         let query= format!("SELECT COUNT (*) FROM {}", table_name);
-        let count: i64 = sqlx::query_scalar(query.as_str()).fetch_one(&pg_pool).await.expect("Failed to get total record !!!!!");
-        return count;
+        let count: Result<i64, Error> = sqlx::query_scalar(query.as_str()).fetch_one(&pg_pool).await;
+        match count {
+            Ok(records_num) => {
+                records_num as usize
+            },
+            Err(error) => {
+                error!("Error while counting records from table: {} - Error: {:?}", self.get_index_setting().get_index_name(), error);
+                panic!();
+            }
+        }
     }
 
-     async fn get_data(&self, size: i64, offset: i64) -> Vec<Value>{
+     async fn get_data(&self, size: usize, offset: usize) -> Vec<Value>{
          let sync_fields = self.get_index_setting().get_sync_fields().as_ref().unwrap();
          let mut fields = String::new();
          if sync_fields.len() > 0 {

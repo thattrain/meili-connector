@@ -32,8 +32,12 @@ pub struct CLI{
 pub enum Commands{
     /// Sync data source with Meilisearch instance
     Sync,
+
     /// Refresh data by swap index
-    Refresh
+    Refresh,
+
+    /// Check whether data in datasource is consistent with data in Meilisearch
+    Status
 }
 //endregion handle cli options
 

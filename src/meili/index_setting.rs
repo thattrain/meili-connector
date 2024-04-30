@@ -9,22 +9,22 @@ use serde::{Deserialize, Serialize};
 pub struct IndexSetting{
 
 /*  Associate with a table name in synced database */
-    index_name: String,
+    pub index_name: String,
 
 /*  Associate with primary key of the table */
-    primary_key: String,
+    pub primary_key: String,
 
 /*  List of fields from data source to sync */
     #[serde(skip_serializing_if = "Option::is_none")]
-    sync_fields: Option<Vec<String>>,
+    pub sync_fields: Option<Vec<String>>,
 
 /*  Number of records to be queried and uploaded to Meili at an interval */
     #[serde(skip_serializing_if = "Option::is_none")]
-    limit: Option<i64>,
+    pub limit: Option<usize>,
 
 /*  Meilisearch settings */
     #[serde(skip_serializing_if = "Option::is_none")]
-    meili_setting: Option<Settings>,
+    pub meili_setting: Option<Settings>,
 }
 
 
@@ -38,7 +38,7 @@ impl IndexSetting{
     pub fn get_sync_fields(&self) -> &Option<Vec<String>>{
         return &self.sync_fields
     }
-    pub fn get_limit(&self) -> i64{
+    pub fn get_limit(&self) -> usize{
         return match self.limit {
             Some(limit) => { limit },
             None => { 10000 }

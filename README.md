@@ -11,6 +11,16 @@ $$ | \_/ $$ |\$$$$$$$\ $$ |$$ |$$ |$$$$$$$  |\$$$$$$$\ \$$$$$$$ |$$ |      \$$$$
                                                                                         Version: 0.1
                                                                                         Author: dattd
 ```
+# Features:
+<ol>
+    <li>Synchronize data from your data source to Meilisearch.</li>
+    <li>Perform change data capture (CDC) to remain data consistency.</li>
+    <li>Refresh data in case of inconsistency between your data source and Meilisearch instance using Meilisearch's swap index feature (performing cost no downtime).</li>
+    <li>Show consistent status between your datasource and Meilisearch instance (record wise).</li>
+    <li>Config search policy of each index. For more documentation please refer to official Meilisearch documentation <a href="https://www.meilisearch.com/docs/reference/api/settings">here</a> .</li>
+
+</ol>
+
 
 Synchronize your datasource (currently support PostgresSQL) with Meilisearch instance.
 
@@ -56,7 +66,7 @@ max_wal_senders = 10
 </ul>
 
 ## Meilisearch:
-Make sure to cover core concepts of Meilisearch such as index, document, index policy and more at: https://www.meilisearch.com/docs
+Make sure to cover core concepts of Meilisearch such as index, document, search policy and more at: https://www.meilisearch.com/docs
 
 ## How to build
 
@@ -74,10 +84,26 @@ cargo build --release
 cargo run -- -h
 ```
 
-<li> Sync data
+<li> Sync data and perform CDC
 
 ```bash
-cargo run -- --config <path> syn
+cargo run -- --config <path> sync
+```
+
+</li>
+
+<li> Check for consistency
+
+```bash
+cargo run -- --config <path> status
+```
+
+</li>
+
+<li> Refresh data by swap index
+
+```bash
+cargo run -- --config <path> refresh
 ```
 
 </li>
@@ -111,6 +137,13 @@ synchronizeTables:
         - username
       searchableAttributes:
         - username
+  - indexName: employees
+    primaryKey: employee_id
+    limit: 10
+    syncFields:
+      - employee_id
+      - first_name
+
 ```
 <strong>* Note: This is a POC and still in development process. Base source can change drastically in the future, please consider to use in production environment with real data.</strong>
 

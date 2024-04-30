@@ -1,6 +1,5 @@
 use clap::Parser;
-use env_logger::Builder;
-use log::{info, LevelFilter};
+use log::LevelFilter;
 
 use crate::config::{CLI, Commands, Config};
 use crate::synchronizer::Synchronizer;
@@ -19,18 +18,26 @@ async  fn main(){
 
     let config = Config::read_config(config_file.to_str().unwrap());
     let Config {data_source, synchronize_tables, meilisearch} = config;
-    let synchronizer = Synchronizer::get_synchronizer(meilisearch, data_source, synchronize_tables);
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(synchronize_tables.len())
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let synchronizer = Synchronizer::get_synchronizer(meilisearch, data_source, synchronize_tables, runtime);
 
     match args.cmd {
         Commands::Sync => {
             synchronizer.sync().await;
         }
         Commands::Refresh => {
-            info!("TODO: impl later")
-            //todo: impl refresh data by swap index
+            synchronizer.refresh().await;
+        }
+        Commands::Status => {
+            synchronizer.status().await;
         }
     }
-
 }
 
 fn init_logger(is_debug: bool){
@@ -40,7 +47,8 @@ fn init_logger(is_debug: bool){
         LevelFilter::Info
     };
 
-    Builder::new()
+    env_logger::Builder::new()
         .filter(None, log_level)
         .init();
 }
+

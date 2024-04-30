@@ -21,8 +21,8 @@ pub enum SupportedDataSource{
 #[async_trait]
 pub trait DataSource: Send{
      async fn version(&self) -> f32;
-     async fn total_record(&self) -> i64;
-     async fn get_data(&self, limit: i64, offset: i64) -> Vec<Value>;
+     async fn total_record(&self) -> usize;
+     async fn get_data(&self, limit: usize, offset: usize) -> Vec<Value>;
      async fn start_event_notifier(&self, index_setting: &IndexSetting, data_source_config: &DataSourceConfig, event_sender: Sender<EventMessage>);
 }
 

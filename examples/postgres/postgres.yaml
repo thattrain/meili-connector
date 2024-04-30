@@ -22,3 +22,9 @@ synchronizeTables:
         - username
       searchableAttributes:
         - username
+  - indexName: employees
+    primaryKey: employee_id
+    limit: 10
+    syncFields:
+      - employee_id
+      - first_name
